@@ -178,8 +178,8 @@ lv_obj_t *medialist_albums_screen;
 
 typedef struct {
 	char *name;
-	char *path; // the track's file; on album rows a representative track
-				// (cover source); NULL on the other name lists
+	char *path; // the track's file; on album and artist rows a representative
+		// track (cover source); NULL on the other name lists
 } entry_t;
 
 // One row of a query-backed list, as read back from the database. Fixed
@@ -878,8 +878,9 @@ static int body_height(const panel_t *p) {
 static int row_height(const panel_t *p) { return p->grid ? p->grid_tile_h : ROW_HEIGHT; }
 
 // The lists that are laid out as a grid when "Album grid" is on: the ones whose
-// rows are albums, read from the index.
-static bool panel_wants_grid(const panel_t *p) { return album_grid && !p->is_tracks && !p->from_paths && p->kind == LIBRARY_LIST_ALBUMS; }
+// rows are albums or artists, read from the index. An artist's tile wears the
+// cover of one of their records.
+static bool panel_wants_grid(const panel_t *p) { return album_grid && !p->is_tracks && !p->from_paths && (p->kind == LIBRARY_LIST_ALBUMS || p->kind == LIBRARY_LIST_ARTISTS || p->kind == LIBRARY_LIST_ALBUM_ARTISTS); }
 
 // Lays the pool out as rows or as tiles. The same widgets serve both: a tile is
 // a row turned on its side -- the cover on top, the title and artist under it
@@ -1003,6 +1004,7 @@ static bool panel_shows_icons(const panel_t *p) {
 	switch (p->kind) {
 	case LIBRARY_LIST_ARTISTS:
 	case LIBRARY_LIST_ALBUM_ARTISTS:
+		return p->grid; // a tile is its cover
 	case LIBRARY_LIST_GENRES:
 	case LIBRARY_LIST_YEARS:
 		return false;
