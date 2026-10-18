@@ -26,9 +26,11 @@
 // album carousel takes 84..89; and the cover at the head of an album's tracks
 // takes 90; the podcasts on the card take 91..102 for their twelve rows, 103
 // for the cover at the head of one of them and 104..107 for the episodes being
-// listened to; and the playlists' grid takes 108..119 -- so the pools never
-// trample each other's requests.
-#define COVERLOADER_SLOTS 120
+// listened to; the playlists' grid takes 108..119; and the rows a grid of three
+// or four columns adds past the first dozen take 120..135 on the name lists and
+// 136..151 on one artist's records -- so the pools never trample each other's
+// requests.
+#define COVERLOADER_SLOTS 152
 #define COVERLOADER_PLAYLISTS_BASE 108
 #define COVERLOADER_PLAYLISTS_COUNT 12
 #define COVERLOADER_SEARCH_BASE 36
