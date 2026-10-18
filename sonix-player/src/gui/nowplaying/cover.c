@@ -2146,6 +2146,44 @@ static void thumb_db_store(const char *key, const cover_image_t *img, bool has_i
 // starts with a letter that is not one.
 static void thumb_picture_key(char *out, size_t out_size, uint64_t id, int box) { snprintf(out, out_size, "p%016llx|%d", (unsigned long long)id, box); }
 
+// The same picture already made at a larger size -- at two columns of the
+// album grid, say, or for Cover Flow -- shrunk to `size`. The smallest one that
+// is still big enough is taken. A few milliseconds against a decode, which for
+// a large progressive JPEG is over a second on this processor.
+static bool thumb_shrink_cached(uint64_t id, int size, cover_image_t *out) {
+	char from[40], to[40];
+	snprintf(from, sizeof(from), "p%016llx|", (unsigned long long)id);
+	snprintf(to, sizeof(to), "p%016llx}", (unsigned long long)id);
+
+	cover_image_t big;
+	memset(&big, 0, sizeof(big));
+	bool found = false;
+	pthread_mutex_lock(&thumb_db_lock);
+	sqlite3_stmt *stmt = NULL;
+	if (thumb_db && sqlite3_prepare_v2(thumb_db,
+									   "SELECT w, h, pixels FROM thumbs WHERE key >= ?1 AND key < ?2 AND w > 0"
+									   " AND (w >= ?3 OR h >= ?3) ORDER BY w * h LIMIT 1",
+									   -1, &stmt, NULL) == SQLITE_OK) {
+		sqlite3_bind_text(stmt, 1, from, -1, SQLITE_STATIC);
+		sqlite3_bind_text(stmt, 2, to, -1, SQLITE_STATIC);
+		sqlite3_bind_int(stmt, 3, size);
+		if (sqlite3_step(stmt) == SQLITE_ROW) {
+			found = image_from_column(stmt, 2, sqlite3_column_int(stmt, 0), sqlite3_column_int(stmt, 1), &big);
+		}
+		sqlite3_finalize(stmt);
+	}
+	pthread_mutex_unlock(&thumb_db_lock);
+	if (!found) {
+		return false;
+	}
+
+	raw_image_t raw;
+	bool ok = raw_from_cover(&big, &raw) && make_scaled(&raw, size, size, COVER_FIT_CONTAIN, out);
+	raw_free(&raw);
+	cover_free(&big);
+	return ok;
+}
+
 // A track's thumbnail, decoded at most once per picture.
 //
 // The file keys are per path, so the dozen tracks of an album that all carry
@@ -2179,6 +2217,12 @@ static cover_build_t thumb_build_track(const char *path, int size, cover_image_t
 			thumb_picture_key(picture_key, sizeof(picture_key), id, size);
 			bool has_image = false;
 			if (thumb_db_load(picture_key, out, &has_image) && has_image) {
+				albumart_free(&art);
+				crumb_set_artwork(NULL);
+				return COVER_BUILD_OK;
+			}
+			if (thumb_shrink_cached(id, size, out)) {
+				thumb_db_store(picture_key, out, true);
 				albumart_free(&art);
 				crumb_set_artwork(NULL);
 				return COVER_BUILD_OK;
