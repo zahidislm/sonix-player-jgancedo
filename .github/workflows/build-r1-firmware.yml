@@ -19,10 +19,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Build target binaries
         working-directory: ./sonix-player
-        run: make target -j$(nproc)
+        run: |
+          # Clean any stale or empty lvgl directory before build if needed
+          if [ -d "lvgl" ] && [ ! -f "lvgl/lvgl.h" ]; then
+            rm -rf lvgl
+          fi
+          make target -j$(nproc)
 
       - name: Prepare packer directory
         run: |
