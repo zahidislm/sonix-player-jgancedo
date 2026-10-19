@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     # Host Toolchain & Compilers
     build-essential \
     gcc \
+    git \
     g++ \
     make \
     patch \
