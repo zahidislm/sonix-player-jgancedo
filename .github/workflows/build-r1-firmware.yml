@@ -1,4 +1,4 @@
-name: Build HiBy R1 Firmware (r1.upt)
+name: Build HiBy R1 Firmware (Fast)
 
 on:
   push:
@@ -9,16 +9,34 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/${{ github.repository }}/cross-toolchain:latest
-      credentials:
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential git pkg-config wget curl \
+            p7zip-full squashfs-tools genisoimage perl \
+            libsdl2-dev libfreetype-dev libopusfile-dev libwavpack-dev libasound2-dev
+
+      - name: Download Pre-compiled MIPS Toolchain
+        run: |
+          mkdir -p sonix-player/rockbox-toolchain
+          # Download a pre-built Rockbox MIPS toolchain archive directly
+          # (If your project hosts a release tarball, replace this URL with your direct link)
+          curl -sSL "https://github.com/rockbox/rockbox/releases/download/v3.15/rockbox-toolchain-mipsel.tar.bz2" | tar -xj -C sonix-player/rockbox-toolchain --strip-components=1 || true
+
+      - name: Cache built static libraries
+        uses: actions/cache@v4
+        with:
+          path: |
+            sonix-player/freetype-target
+            sonix-player/audio-target
+          key: ${{ runner.os }}-sonix-audio-libs-${{ hashFiles('sonix-player/Makefile') }}
 
       - name: Build target binaries
         working-directory: ./sonix-player
@@ -33,7 +51,6 @@ jobs:
         run: |
           if [ -z "${{ secrets.R1_STOCK_FW_URL }}" ]; then
             echo "Error: R1_STOCK_FW_URL secret is not set."
-            echo "Please set R1_STOCK_FW_URL in Settings > Secrets and variables > Actions."
             exit 1
           fi
           wget -O sonix-packer/r1_original.upt "${{ secrets.R1_STOCK_FW_URL }}"
