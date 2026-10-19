@@ -1,0 +1,52 @@
+name: Build HiBy R1 Firmware (r1.upt)
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/${{ github.repository }}/cross-toolchain:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build target binaries
+        working-directory: ./sonix-player
+        run: make target -j$(nproc)
+
+      - name: Prepare packer directory
+        run: |
+          cp sonix-player/sonix_player sonix-packer/
+          find ./sonix-player -name sonix_launch -exec cp {} sonix-packer/ \;
+
+      - name: Download stock R1 firmware
+        run: |
+          if [ -z "${{ secrets.R1_STOCK_FW_URL }}" ]; then
+            echo "Error: R1_STOCK_FW_URL secret is not set."
+            echo "Please set R1_STOCK_FW_URL in Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+          wget -O sonix-packer/r1_original.upt "${{ secrets.R1_STOCK_FW_URL }}"
+
+      - name: Pack custom firmware
+        working-directory: ./sonix-packer
+        run: |
+          chmod +x sonix_firmware_packer.sh
+          ./sonix_firmware_packer.sh
+
+      - name: Upload r1.upt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: r1-firmware
+          path: sonix-packer/r1.upt
+          if-no-files-found: error
