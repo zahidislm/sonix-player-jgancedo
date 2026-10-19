@@ -2,7 +2,7 @@ FROM ubuntu:24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install host build tools, rockboxdev prerequisites, and target audio libraries
+# Install host build tools, rockboxdev prerequisites, and target libraries
 RUN apt-get update && apt-get install -y \
     build-essential \
     git \
@@ -18,6 +18,9 @@ RUN apt-get update && apt-get install -y \
     gzip \
     bzip2 \
     xz-utils \
+    gawk \
+    python3 \
+    python-is-python3 \
     autoconf \
     automake \
     libtool \
@@ -30,7 +33,6 @@ RUN apt-get update && apt-get install -y \
     squashfs-tools \
     genisoimage \
     perl \
-    python3 \
     libsdl2-dev \
     libfreetype-dev \
     libopusfile-dev \
