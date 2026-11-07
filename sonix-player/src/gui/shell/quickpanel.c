@@ -19,6 +19,7 @@
 #include "src/gui/wireless/sonixlink.h"
 #include "src/gui/wireless/wifitransfer.h"
 #include "src/gui/shell/theme.h"
+#include "src/gui/shell/toast.h"
 #include "src/system/playback/audiobook.h"
 #include "src/system/streaming/podcast.h"
 #include "src/system/streaming/podcastcache.h"
@@ -31,6 +32,7 @@
 #include "src/gui/wireless/wifisettings.h"
 #include "src/system/remote/airplay.h"
 #include "src/system/audio/alsa-controls.h"
+#include "src/system/audio/audio.h"
 #include "src/system/bluetooth/bluetooth.h"
 #include "src/system/core/config.h"
 #include "src/system/playback/device_state.h"
@@ -220,6 +222,7 @@ static bool press_dragged;
 // The now-playing card's widgets.
 static lv_obj_t *np_title;
 static lv_obj_t *np_artist;
+static lv_obj_t *np_transport; // the row of buttons under them
 static lv_obj_t *np_play_btn;
 static lv_obj_t *np_play_icon;
 static lv_obj_t *np_repeat_icon;
@@ -1473,6 +1476,17 @@ static void refresh_audio_buttons(void) {
 	circle_button_set_on(sleep_podcast_btn, sleep_timer_armed(SLEEPTIMER_PODCAST));
 	circle_button_set_on(wifi_transfer_btn, wifitransfer_get_enabled());
 
+	// Bit-perfect holds the effects off (musicsettings.c): their buttons are
+	// greyed out and take no touch, the press that opens their page included.
+	bool pure = audio_get_bit_perfect();
+	lv_obj_t *effects[] = {eq_btn, mseb_btn, peq_btn, fade_btn};
+	for (size_t i = 0; i < sizeof(effects) / sizeof(effects[0]); i++) {
+		if (effects[i]) {
+			lv_obj_set_state(effects[i], LV_STATE_DISABLED, pure);
+			lv_obj_set_style_opa(effects[i], pure ? LV_OPA_40 : LV_OPA_COVER, 0);
+		}
+	}
+
 	bool high = musicsettings_high_gain();
 	if (gain_btn) {
 		lv_obj_t *icon = lv_obj_get_child(gain_btn, 0);
@@ -1629,11 +1643,24 @@ static void airplay_clicked_cb(lv_event_t *e) {
 	toggled();
 }
 
+// Bit-perfect holds the effects off (musicsettings.c) and their buttons are
+// disabled: a click that still reaches one changes nothing and says why.
+static bool held_by_bit_perfect(void) {
+	if (!audio_get_bit_perfect()) {
+		return false;
+	}
+	toast_plain("bit_perfect_holds_off");
+	return true;
+}
+
 static void mseb_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (long_press_consumed) {
 		long_press_consumed = false;
 		return; // the long press that opened the page must not also toggle
+	}
+	if (held_by_bit_perfect()) {
+		return;
 	}
 	musicsettings_set_mseb_enabled(!mseb_get_enabled());
 	toggled();
@@ -1645,6 +1672,9 @@ static void eq_clicked_cb(lv_event_t *e) {
 		long_press_consumed = false;
 		return;
 	}
+	if (held_by_bit_perfect()) {
+		return;
+	}
 	musicsettings_set_eq_enabled(!eq_get_enabled());
 	toggled();
 }
@@ -1653,6 +1683,9 @@ static void fade_clicked_cb(lv_event_t *e) {
 	(void)e;
 	if (long_press_consumed) {
 		long_press_consumed = false;
+		return;
+	}
+	if (held_by_bit_perfect()) {
 		return;
 	}
 	musicsettings_set_fade_enabled(!musicsettings_fade_enabled());
@@ -1813,11 +1846,14 @@ static void peq_clicked_cb(lv_event_t *e) {
 		long_press_consumed = false;
 		return;
 	}
+	if (held_by_bit_perfect()) {
+		return;
+	}
 	peq_set_enabled(!peq_get_enabled());
 	toggled();
 }
 
-// Gapless, the switch on the playback options page: a tap flips it, a hold
+// Gapless, the switch on the fade and gapless page: a tap flips it, a hold
 // opens that page. Looked up at the press, like the sleep timer's page.
 static void gapless_clicked_cb(lv_event_t *e) {
 	(void)e;
@@ -1831,7 +1867,7 @@ static void gapless_clicked_cb(lv_event_t *e) {
 
 static void gapless_page_cb(lv_event_t *e) {
 	(void)e;
-	open_page(musicsettings_playback_screen());
+	open_page(musicsettings_fade_screen());
 }
 
 static void gain_clicked_cb(lv_event_t *e) {
@@ -1881,6 +1917,42 @@ static lv_obj_t *make_flat_button(lv_obj_t *parent, int size, lv_event_cb_t cb) 
 	lv_obj_set_style_pad_all(btn, 0, 0);
 	lv_obj_add_event_cb(btn, cb, LV_EVENT_CLICKED, NULL);
 	return btn;
+}
+
+// The now-playing card above its buttons -- the title, the artist and the space
+// over them -- is the way to the player: the sheet goes away and the player
+// comes up, as from the Music page. A tap only: a press that moved the sheet is
+// not one, as for the sheet's other tap targets. Taps on the row of buttons are
+// the buttons' own, and those between them, bubbled up from the row, are nobody's.
+static void np_card_clicked_cb(lv_event_t *e) {
+	if (press_dragged) {
+		return;
+	}
+	if (lv_event_get_target(e) != np_card) {
+		return;
+	}
+	lv_indev_t *indev = lv_indev_active();
+	if (indev && np_transport) {
+		lv_point_t p;
+		lv_area_t row;
+		lv_indev_get_point(indev, &p);
+		lv_obj_get_coords(np_transport, &row);
+		if (p.y >= row.y1) {
+			return; // under the title and artist: the card's edge round the buttons
+		}
+	}
+
+	device_state_t state;
+	device_state_get(&state);
+	if (!state.live && !state.current_file[0]) {
+		return; // nothing playing, and no player to show
+	}
+
+	quickpanel_close();
+	if (!player_sheet_is_open()) {
+		player_refresh_now_playing();
+		switch_screen(player_screen);
+	}
 }
 
 // The rounded surface each half of the panel sits on. Both cards are the same
@@ -2166,6 +2238,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	lv_obj_set_flex_flow(np_card, LV_FLEX_FLOW_COLUMN);
 	lv_obj_set_flex_align(np_card, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
 	lv_obj_set_style_pad_gap(np_card, 6, 0);
+	lv_obj_add_event_cb(np_card, np_card_clicked_cb, LV_EVENT_CLICKED, NULL);
 
 	// Title and artist are centred and scroll when too long, the same treatment
 	// as the player's now-playing lines. Each is exactly one line of its own
@@ -2189,6 +2262,7 @@ void quickpanel_init(gui_config_t *cfg) {
 	scrolltext_apply(np_artist);
 
 	lv_obj_t *transport = lv_obj_create(np_card);
+	np_transport = transport;
 	lv_obj_set_size(transport, lv_pct(100), 96);
 	lv_obj_set_style_bg_opa(transport, 0, 0);
 	lv_obj_set_style_border_width(transport, 0, 0);
